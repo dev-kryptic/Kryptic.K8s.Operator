@@ -18,7 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dev-kryptic/k8s-operator/internal/crypto"
+	"github.com/dev-kryptic/Kryptic.Encryption.Go/envelope"
+	"github.com/dev-kryptic/Kryptic.Encryption.Go/kdf"
+	"github.com/dev-kryptic/Kryptic.Encryption.Go/sealedbox"
 )
 
 // DefaultBaseURL is the hosted Pipelines BFF. Self-hosted deployments override
@@ -137,7 +139,7 @@ func (c *Client) decrypt(creds Credentials, keys machineKeys, bundle cipherBundl
 		return nil, err
 	}
 
-	privateKey, err := crypto.OpenEnvelope(unwrapKey, keys.WrappedPrivateKey, nil)
+	privateKey, err := envelope.Open(unwrapKey, keys.WrappedPrivateKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("could not unwrap the machine private key - wrong client secret?")
 	}
@@ -146,15 +148,19 @@ func (c *Client) decrypt(creds Credentials, keys machineKeys, bundle cipherBundl
 		return nil, fmt.Errorf("invalid machine public key encoding: %w", err)
 	}
 
-	orgKey, err := crypto.OpenSealedBox(publicKey, privateKey, bundle.WrappedOrgKey)
+	box, err := sealedbox.Parse(bundle.WrappedOrgKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid wrapped org key: %w", err)
+	}
+	orgKey, err := sealedbox.Open(sealedbox.KeyPair{Public: publicKey, Private: privateKey}, box)
 	if err != nil {
 		return nil, fmt.Errorf("could not unwrap the org key - the machine grant may be stale, rotate the identity")
 	}
 
 	pairs := make(Bundle, len(bundle.Secrets))
 	for _, entry := range bundle.Secrets {
-		associatedData := crypto.SecretContext(entry.DefinitionId, entry.EnvironmentId)
-		plaintext, err := crypto.OpenEnvelope(orgKey, entry.Envelope, associatedData)
+		associatedData := envelope.SecretContext(entry.DefinitionId, entry.EnvironmentId)
+		plaintext, err := envelope.Open(orgKey, entry.Envelope, associatedData)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %q: %w", entry.Key, err)
 		}
@@ -181,7 +187,7 @@ func (c *Client) deriveUnwrapKey(creds Credentials, keys machineKeys) ([]byte, e
 	if err != nil {
 		return nil, fmt.Errorf("invalid KDF salt encoding: %w", err)
 	}
-	derived, err := crypto.Argon2idKey(keys.KdfParametersVersion, creds.ClientSecret, salt)
+	derived, err := kdf.ForVersion(keys.KdfParametersVersion, creds.ClientSecret, salt)
 	if err != nil {
 		return nil, err
 	}
