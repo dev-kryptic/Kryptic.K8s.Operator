@@ -29,6 +29,15 @@ spec:
 
 ## Install
 
+Prefer the latest GitHub Release so the image tag matches a published build:
+
+```bash
+kubectl apply -f https://github.com/dev-kryptic/Kryptic.K8s.Operator/releases/latest/download/crd.yaml
+kubectl apply -f https://github.com/dev-kryptic/Kryptic.K8s.Operator/releases/latest/download/operator.yaml
+```
+
+From a clone (image tag is whatever is in `deploy/operator.yaml`):
+
 ```bash
 kubectl apply -f deploy/crd.yaml
 kubectl apply -f deploy/operator.yaml
@@ -90,5 +99,10 @@ go test ./test/e2e -tags=e2e -count=1 -timeout 10m
 kubectl apply -f deploy/crd.yaml
 go run ./cmd/kryptic-operator -kubeconfig=$HOME/.kube/config -log-level=debug
 ```
+
+A merge to `main` that passes unit tests and section 17 QA tags the next
+version, publishes `ghcr.io/dev-kryptic/kryptic-operator`, and opens a GitHub
+Release. After the first image lands, make that GHCR package public or cluster
+pulls will 401.
 
 License: Apache 2.0.

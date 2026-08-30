@@ -33,6 +33,16 @@ kubectl apply -f deploy/crd.yaml
 go run ./cmd/kryptic-operator -kubeconfig=$HOME/.kube/config -log-level=debug
 ```
 
+## Releasing
+
+A merge to `main` is the release. After unit tests and section 17 QA pass,
+the Release workflow bumps the patch version (or minor / major if a commit
+since the last tag contains `#minor` or `#major`), tags `vX.Y.Z`, pushes
+`ghcr.io/dev-kryptic/kryptic-operator:X.Y.Z`, and creates a GitHub Release
+with `crd.yaml` and `operator.yaml`. A failing test skips the tag.
+
+The first successful run on `main` ships `0.1.0` from `VERSION` without a bump.
+
 ## Licensing of contributions
 
 This repository is Apache-2.0. By opening a pull request you confirm the

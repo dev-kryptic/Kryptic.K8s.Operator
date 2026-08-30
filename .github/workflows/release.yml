@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operator-release
+  cancel-in-progress: false
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  e2e:
+    name: Operator QA (section 17)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: kryptic-e2e
+
+      - name: Pre-pull consumer image
+        run: |
+          docker pull busybox:1.36
+          kind load docker-image busybox:1.36 --name kryptic-e2e
+
+      - name: Run cluster QA
+        run: go test ./test/e2e -tags=e2e -count=1 -timeout 10m -v
+
+  release:
+    name: Tag and publish
+    needs: [unit, e2e]
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Next version
+        id: version
+        run: |
+          set -euo pipefail
+          if git describe --exact-match --tags HEAD 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            tag="$(git describe --exact-match --tags HEAD)"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "already_tagged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          chmod +x .github/scripts/next-version.sh
+          eval "$(.github/scripts/next-version.sh)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "already_tagged=false" >> "$GITHUB_OUTPUT"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Record version and tag
+        if: steps.version.outputs.already_tagged != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          BUMP: ${{ steps.version.outputs.bump }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          printf '%s\n' "$VERSION" > VERSION
+          sed -i "s|ghcr.io/dev-kryptic/kryptic-operator:[0-9][0-9.]*|ghcr.io/dev-kryptic/kryptic-operator:${VERSION}|" deploy/operator.yaml
+
+          if [[ "$BUMP" == "true" ]] || ! git diff --quiet VERSION deploy/operator.yaml; then
+            git add VERSION deploy/operator.yaml
+            git commit -m "chore(release): ${TAG}"
+            git push origin "HEAD:main"
+          fi
+
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ghcr.io/dev-kryptic/kryptic-operator:${{ steps.version.outputs.version }}
+            ghcr.io/dev-kryptic/kryptic-operator:${{ steps.version.outputs.tag }}
+            ghcr.io/dev-kryptic/kryptic-operator:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - name: Release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          NOTES: ${{ runner.temp }}/release-notes.md
+        run: |
+          set -euo pipefail
+          last="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | awk -v cur="$TAG" '$0 != cur { print; exit }')"
+          {
+            echo "kryptic-operator ${VERSION}"
+            echo
+            echo "Image: \`ghcr.io/dev-kryptic/kryptic-operator:${VERSION}\`"
+            echo
+            if [[ -n "$last" ]]; then
+              echo "Changes since ${last}:"
+              echo
+              git log --pretty=format:'- %s' "${last}..${TAG}^0"
+              echo
+            else
+              echo "Initial release."
+            fi
+          } > "$NOTES"
+          echo "file=$NOTES" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "kryptic-operator ${VERSION}" --notes-file "$NOTES_FILE"
+            gh release upload "$TAG" deploy/crd.yaml deploy/operator.yaml --clobber
+          else
+            gh release create "$TAG" \
+              deploy/crd.yaml \
+              deploy/operator.yaml \
+              --title "kryptic-operator ${VERSION}" \
+              --notes-file "$NOTES_FILE" \
+              --verify-tag
+          fi
