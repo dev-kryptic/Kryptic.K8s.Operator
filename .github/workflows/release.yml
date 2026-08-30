@@ -61,7 +61,6 @@ jobs:
   release:
     name: Tag and publish
     needs: [unit, e2e]
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
