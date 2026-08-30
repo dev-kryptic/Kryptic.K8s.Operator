@@ -45,7 +45,8 @@ kubectl apply -f deploy/operator.yaml
 
 Then create a machine identity in the Kryptic dashboard (Machine identities ->
 New identity) and store its credentials in the namespace where your
-`KrypticSecret`s live:
+`KrypticSecret`s live. This per-namespace Secret is the recommended production
+path: each app rotates and revokes on its own.
 
 ```bash
 kubectl create secret generic kryptic-machine-credentials \
@@ -57,6 +58,41 @@ Self-hosted platforms add `--from-literal=apiUrl=https://pipelines.kryptic.examp
 
 `deploy/example.yaml` is a complete working example including a Deployment that
 consumes the produced Secret.
+
+### Optional cluster machine identity
+
+For non-production clusters you can set one machine identity on the operator
+instead of a Secret in every namespace. Create the Secret once in
+`kryptic-system`, uncomment the `KRYPTIC_CLIENT_ID` / `KRYPTIC_CLIENT_SECRET`
+env block in `deploy/operator.yaml`, and omit `spec.auth` on the CR:
+
+```yaml
+apiVersion: kryptic.dev/v1
+kind: KrypticSecret
+metadata:
+  name: backend-secrets
+spec:
+  projectId: proj_a1b2c3d4e5f6
+  environment: development
+  secretName: backend-env
+```
+
+```bash
+kubectl create secret generic kryptic-machine-credentials \
+  --namespace kryptic-system \
+  --from-literal=clientId=kmi_xxxxxxxxxxxxxxxx \
+  --from-literal=clientSecret=<the one-time secret>
+```
+
+Self-hosted platforms add `--from-literal=apiUrl=...`. The operator reads that
+as `KRYPTIC_API_URL`.
+
+This is a convenience for labs and single-operator clusters. It is not the
+recommended production path: every `KrypticSecret` in the cluster then shares
+one identity, so a leak or a curious CR can read any project that identity can
+decrypt. When `spec.auth.secretRef` is set, that namespace Secret always wins
+and a missing or incomplete named Secret does not fall back to the cluster
+identity.
 
 ## Behavior
 
@@ -79,6 +115,7 @@ consumes the produced Secret.
 | `spec.environment` | required | Environment slug |
 | `spec.secretName` | CR name | Target Kubernetes Secret |
 | `spec.refreshInterval` | `5m` | Values below 30s are ignored |
+| `spec.auth.secretRef` | cluster env, if set | Per-namespace credentials. Recommended in production. |
 | `spec.keys` | all | Restrict which keys are synced |
 | `spec.template.type` | `Opaque` | Type of the produced Secret |
 | `spec.template.labels` / `.annotations` | - | Merged onto the produced Secret |

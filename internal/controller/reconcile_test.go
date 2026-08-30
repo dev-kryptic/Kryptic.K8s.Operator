@@ -345,6 +345,98 @@ func TestRefreshIntervalParsing(t *testing.T) {
 	}
 }
 
+func TestClusterCredentialsWhenAuthOmitted(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "from-cluster"}}
+	reconciler, kube := newReconciler(t, fetcher)
+	reconciler.Cluster = ClusterCredentials{
+		ClientID:     "kmi_cluster",
+		ClientSecret: "cluster-secret",
+		BaseURL:      "https://pipelines.internal",
+	}
+
+	cr := testCR()
+	cr.Spec.Auth = KrypticSecretAuth{}
+
+	result := reconciler.Reconcile(context.Background(), cr)
+	if result.Condition.Status != metav1.ConditionTrue {
+		t.Fatalf("expected Ready=True, got %s (%s)", result.Condition.Reason, result.Condition.Message)
+	}
+	if fetcher.gotCredentials.ClientID != "kmi_cluster" || fetcher.gotCredentials.ClientSecret != "cluster-secret" {
+		t.Fatalf("cluster credentials not used: %+v", fetcher.gotCredentials)
+	}
+	if fetcher.gotCredentials.BaseURL != "https://pipelines.internal" {
+		t.Fatalf("cluster apiUrl = %q", fetcher.gotCredentials.BaseURL)
+	}
+	if _, err := kube.CoreV1().Secrets("default").Get(context.Background(), "backend-env", metav1.GetOptions{}); err != nil {
+		t.Fatalf("target secret not created: %v", err)
+	}
+}
+
+func TestNamespaceAuthWinsOverClusterCredentials(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher, credentialsSecret("default", "creds", nil))
+	reconciler.Cluster = ClusterCredentials{
+		ClientID:     "kmi_cluster",
+		ClientSecret: "cluster-secret",
+	}
+
+	reconciler.Reconcile(context.Background(), testCR())
+
+	if fetcher.gotCredentials.ClientID != "kmi_test" || fetcher.gotCredentials.ClientSecret != "shhh" {
+		t.Fatalf("namespace secret must win: %+v", fetcher.gotCredentials)
+	}
+}
+
+func TestNamedSecretDoesNotFallBackToCluster(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher) // named secret missing
+	reconciler.Cluster = ClusterCredentials{
+		ClientID:     "kmi_cluster",
+		ClientSecret: "cluster-secret",
+	}
+
+	result := reconciler.Reconcile(context.Background(), testCR())
+
+	if result.Condition.Reason != ReasonAuthSecret {
+		t.Fatalf("expected AuthSecretInvalid, got %s/%s", result.Condition.Status, result.Condition.Reason)
+	}
+	if fetcher.calls != 0 {
+		t.Fatal("fell back to cluster credentials after a named secret miss")
+	}
+}
+
+func TestMissingAuthAndNoClusterCredentials(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher)
+
+	cr := testCR()
+	cr.Spec.Auth = KrypticSecretAuth{}
+
+	result := reconciler.Reconcile(context.Background(), cr)
+
+	if result.Condition.Reason != ReasonAuthSecret {
+		t.Fatalf("expected AuthSecretInvalid, got %s", result.Condition.Reason)
+	}
+	if fetcher.calls != 0 {
+		t.Fatal("fetched without any credentials")
+	}
+}
+
+func TestClusterCredentialsFromEnv(t *testing.T) {
+	t.Setenv(EnvClientID, "kmi_env")
+	t.Setenv(EnvClientSecret, "env-secret")
+	t.Setenv(EnvAPIURL, "https://pipelines.env")
+
+	got := ClusterCredentialsFromEnv()
+	if !got.Configured() {
+		t.Fatal("expected env credentials to be configured")
+	}
+	creds := got.Credentials()
+	if creds.ClientID != "kmi_env" || creds.ClientSecret != "env-secret" || creds.BaseURL != "https://pipelines.env" {
+		t.Fatalf("unexpected credentials: %+v", creds)
+	}
+}
+
 func TestCustomSecretTypeAndLabels(t *testing.T) {
 	cr := testCR()
 	cr.Spec.Template.Type = "kubernetes.io/dockerconfigjson"

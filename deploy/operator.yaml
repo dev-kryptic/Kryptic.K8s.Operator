@@ -74,6 +74,31 @@ spec:
             # Empty watches every namespace; set to scope the operator.
             - name: WATCH_NAMESPACE
               value: ""
+            # Optional cluster machine identity. Non-production convenience:
+            # one Secret in kryptic-system, then KrypticSecrets may omit
+            # spec.auth. Per-namespace spec.auth.secretRef is the recommended
+            # production path and always wins when set.
+            # Create the Secret, then uncomment:
+            #   kubectl create secret generic kryptic-machine-credentials \
+            #     --namespace kryptic-system \
+            #     --from-literal=clientId=kmi_xxxxxxxxxxxxxxxx \
+            #     --from-literal=clientSecret=<the one-time secret>
+            # - name: KRYPTIC_CLIENT_ID
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: kryptic-machine-credentials
+            #       key: clientId
+            # - name: KRYPTIC_CLIENT_SECRET
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: kryptic-machine-credentials
+            #       key: clientSecret
+            # - name: KRYPTIC_API_URL
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: kryptic-machine-credentials
+            #       key: apiUrl
+            #       optional: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

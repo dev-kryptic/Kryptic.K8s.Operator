@@ -46,9 +46,10 @@ func TestQASection17(t *testing.T) {
 			"projectId":   "proj_e2e000000001",
 			"environment": "development",
 		})
-		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "auth") {
-			t.Fatalf("expected auth required, got %v", err)
+		if err != nil {
+			t.Fatalf("auth is optional; schema rejected the CR: %v", err)
 		}
+		h.waitReady(ns, "missing-auth", metav1.ConditionFalse, controller.ReasonAuthSecret)
 	})
 
 	t.Run("17.4_sync", func(t *testing.T) {
@@ -239,6 +240,26 @@ func TestQASection17_WatchNamespace(t *testing.T) {
 
 	h.applyCR(h.cr(watched, "watched-secrets", "watched-env", []string{"DATABASE_URL"}))
 	h.waitReady(watched, "watched-secrets", metav1.ConditionTrue, controller.ReasonSynced)
+}
+
+func TestQASection17_ClusterCredentials(t *testing.T) {
+	h := setup(t)
+	const ns = "e2e-kryptic-cluster-creds"
+	h.ns(ns)
+	h.startOperatorWith("", controller.ClusterCredentials{
+		ClientID:     platformClientID,
+		ClientSecret: platformClientSecret,
+		BaseURL:      h.platform.URL(),
+	})
+
+	cr := h.cr(ns, "cluster-auth-secrets", "cluster-auth-env", []string{"DATABASE_URL"})
+	cr.Spec.Auth = controller.KrypticSecretAuth{}
+	h.applyCR(cr)
+	h.waitReady(ns, "cluster-auth-secrets", metav1.ConditionTrue, controller.ReasonSynced)
+	data := h.secretData(ns, "cluster-auth-env")
+	if data["DATABASE_URL"] == "" || data["REDIS_URL"] != "" {
+		t.Fatalf("cluster credentials sync mismatch: %v", keysOf(data))
+	}
 }
 
 func unstructuredString(obj map[string]any, fields ...string) (string, bool, error) {

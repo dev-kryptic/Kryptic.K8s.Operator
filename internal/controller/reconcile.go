@@ -31,6 +31,7 @@ type Reconciler struct {
 	Kube    kubernetes.Interface
 	Fetcher krypticapi.Fetcher
 	Log     *slog.Logger
+	Cluster ClusterCredentials
 }
 
 // Result reports what the reconcile did and when to come back.
@@ -80,14 +81,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, cr *KrypticSecret) Result {
 	}
 }
 
-// credentials reads the machine identity from the referenced Kubernetes Secret.
+// credentials prefers spec.auth.secretRef in the CR's namespace. If that name
+// is empty, it uses optional cluster credentials. A named Secret that is
+// missing or incomplete is an error; it does not fall back to the cluster
+// identity.
 func (r *Reconciler) credentials(ctx context.Context, cr *KrypticSecret) (krypticapi.Credentials, error) {
 	name := cr.Spec.Auth.SecretRef.Name
-	if name == "" {
-		return krypticapi.Credentials{}, errors.New("spec.auth.secretRef.name is empty")
+	if name != "" {
+		return r.credentialsFromSecret(ctx, cr.Namespace, name)
 	}
+	if r.Cluster.Configured() {
+		return r.Cluster.Credentials(), nil
+	}
+	return krypticapi.Credentials{}, errors.New(
+		"spec.auth.secretRef.name is empty and the operator has no cluster credentials " +
+			"(set KRYPTIC_CLIENT_ID and KRYPTIC_CLIENT_SECRET, or add spec.auth)")
+}
 
-	secret, err := r.Kube.CoreV1().Secrets(cr.Namespace).Get(ctx, name, metav1.GetOptions{})
+func (r *Reconciler) credentialsFromSecret(ctx context.Context, namespace, name string) (krypticapi.Credentials, error) {
+	secret, err := r.Kube.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return krypticapi.Credentials{}, fmt.Errorf("reading credentials secret %q: %w", name, err)
 	}

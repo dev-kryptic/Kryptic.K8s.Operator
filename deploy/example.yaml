@@ -1,4 +1,6 @@
 # A complete working example: machine identity credentials + one KrypticSecret.
+# Per-namespace credentials (below) are the recommended production path.
+# For a non-production cluster identity, see README "Optional cluster machine identity".
 #
 # Create the machine identity in the Kryptic dashboard
 # (Machine identities -> New identity), then:

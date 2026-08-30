@@ -142,6 +142,10 @@ func crdEstablished(obj *unstructured.Unstructured) bool {
 }
 
 func (h *harness) startOperator(namespace string) context.CancelFunc {
+	return h.startOperatorWith(namespace, controller.ClusterCredentials{})
+}
+
+func (h *harness) startOperatorWith(namespace string, cluster controller.ClusterCredentials) context.CancelFunc {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -151,6 +155,7 @@ func (h *harness) startOperator(namespace string) context.CancelFunc {
 			Kube:    h.kube,
 			Fetcher: krypticapi.NewClient(),
 			Log:     logger,
+			Cluster: cluster,
 		},
 		Namespace: namespace,
 		Log:       logger,

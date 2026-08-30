@@ -49,12 +49,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	cluster := controller.ClusterCredentialsFromEnv()
+
 	manager := &controller.Manager{
 		Dynamic: dynamicClient,
 		Reconciler: &controller.Reconciler{
 			Kube:    kubeClient,
 			Fetcher: krypticapi.NewClient(),
 			Log:     logger,
+			Cluster: cluster,
 		},
 		Namespace: *namespace,
 		Log:       logger,
@@ -67,7 +70,10 @@ func main() {
 	if scope == "" {
 		scope = "all namespaces"
 	}
-	logger.Info("kryptic-operator starting", "version", version, "watching", scope)
+	logger.Info("kryptic-operator starting",
+		"version", version,
+		"watching", scope,
+		"clusterCredentials", cluster.Configured())
 
 	if err := manager.Run(ctx); err != nil && ctx.Err() == nil {
 		logger.Error("operator stopped", "error", err)

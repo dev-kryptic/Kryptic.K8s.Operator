@@ -48,8 +48,11 @@ type KrypticSecretSpec struct {
 	RefreshInterval string `json:"refreshInterval,omitempty"`
 	// Keys optionally restricts which secret keys are synced; empty means all.
 	Keys []string `json:"keys,omitempty"`
-	// Auth points at the Kubernetes Secret holding machine identity credentials.
-	Auth KrypticSecretAuth `json:"auth"`
+	// Auth points at a Secret in the same namespace holding machine identity
+	// credentials. Omit it only when the operator has cluster credentials
+	// (KRYPTIC_CLIENT_ID / KRYPTIC_CLIENT_SECRET). Per-namespace auth is the
+	// recommended production path.
+	Auth KrypticSecretAuth `json:"auth,omitempty"`
 	// Template customizes the produced Secret.
 	Template KrypticSecretTemplate `json:"template,omitempty"`
 }

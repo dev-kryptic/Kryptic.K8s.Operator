@@ -43,7 +43,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [projectId, environment, auth]
+              required: [projectId, environment]
               properties:
                 projectId:
                   type: string
@@ -67,6 +67,10 @@ spec:
                     type: string
                 auth:
                   type: object
+                  description: >-
+                    Per-namespace machine identity. Recommended for production.
+                    Omit only when the operator has cluster credentials
+                    (KRYPTIC_CLIENT_ID and KRYPTIC_CLIENT_SECRET).
                   required: [secretRef]
                   properties:
                     secretRef:
@@ -75,7 +79,8 @@ spec:
                       description: >-
                         Secret in the same namespace with keys clientId and clientSecret
                         (a Kryptic machine identity), plus optional apiUrl for self-hosted
-                        Pipelines BFF deployments.
+                        Pipelines BFF deployments. When this name is set it always
+                        wins over cluster credentials.
                       properties:
                         name:
                           type: string
