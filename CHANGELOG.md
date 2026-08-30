@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- Release workflow tags the tested SHA and uploads pinned manifests. It no
+  longer pushes `chore(release)` commits to `main`, so branch rulesets stay
+  intact.
+
 ### Added
 
 - Optional cluster machine identity via `KRYPTIC_CLIENT_ID`,

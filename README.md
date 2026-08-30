@@ -137,9 +137,9 @@ kubectl apply -f deploy/crd.yaml
 go run ./cmd/kryptic-operator -kubeconfig=$HOME/.kube/config -log-level=debug
 ```
 
-A merge to `main` that passes unit tests and section 17 QA tags the next
-version, publishes `ghcr.io/dev-kryptic/kryptic-operator`, and opens a GitHub
-Release. After the first image lands, make that GHCR package public or cluster
-pulls will 401.
+A merge to `main` that passes unit tests and section 17 QA tags that commit,
+publishes `ghcr.io/dev-kryptic/kryptic-operator`, and opens a GitHub Release.
+The workflow does not push commits to `main`. After the first image lands, make
+that GHCR package public or cluster pulls will 401.
 
 License: Apache 2.0.

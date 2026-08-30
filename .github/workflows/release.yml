@@ -93,25 +93,20 @@ jobs:
           echo "already_tagged=false" >> "$GITHUB_OUTPUT"
           echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
-      - name: Record version and tag
+      - name: Pin artifacts and tag
         if: steps.version.outputs.already_tagged != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
-          BUMP: ${{ steps.version.outputs.bump }}
         run: |
           set -euo pipefail
+          # Do not push commits to main. Rulesets require a PR, signed commits,
+          # and status checks. Tag the SHA that already passed unit + e2e.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           printf '%s\n' "$VERSION" > VERSION
           sed -i "s|ghcr.io/dev-kryptic/kryptic-operator:[0-9][0-9.]*|ghcr.io/dev-kryptic/kryptic-operator:${VERSION}|" deploy/operator.yaml
-
-          if [[ "$BUMP" == "true" ]] || ! git diff --quiet VERSION deploy/operator.yaml; then
-            git add VERSION deploy/operator.yaml
-            git commit -m "chore(release): ${TAG}"
-            git push origin "HEAD:main"
-          fi
 
           git tag -a "$TAG" -m "$TAG"
           git push origin "$TAG"
