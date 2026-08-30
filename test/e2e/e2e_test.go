@@ -237,21 +237,33 @@ func (h *harness) deleteCR(namespace, name string) {
 
 func (h *harness) touchCR(namespace, name string) {
 	h.t.Helper()
-	obj, err := h.dyn.Resource(controller.KrypticSecretGVR).Namespace(namespace).
-		Get(context.Background(), name, metav1.GetOptions{})
-	if err != nil {
-		h.t.Fatal(err)
+	// The operator writes status on every reconcile, which bumps resourceVersion.
+	// A single Get/Update races that write on GitHub runners.
+	var last error
+	for attempt := 0; attempt < 12; attempt++ {
+		obj, err := h.dyn.Resource(controller.KrypticSecretGVR).Namespace(namespace).
+			Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		ann := obj.GetAnnotations()
+		if ann == nil {
+			ann = map[string]string{}
+		}
+		ann["e2e.kryptic.dev/tick"] = fmt.Sprintf("%d", time.Now().UnixNano())
+		obj.SetAnnotations(ann)
+		_, err = h.dyn.Resource(controller.KrypticSecretGVR).Namespace(namespace).
+			Update(context.Background(), obj, metav1.UpdateOptions{})
+		if err == nil {
+			return
+		}
+		if !apierrors.IsConflict(err) {
+			h.t.Fatal(err)
+		}
+		last = err
+		time.Sleep(50 * time.Millisecond)
 	}
-	ann := obj.GetAnnotations()
-	if ann == nil {
-		ann = map[string]string{}
-	}
-	ann["e2e.kryptic.dev/tick"] = fmt.Sprintf("%d", time.Now().UnixNano())
-	obj.SetAnnotations(ann)
-	if _, err := h.dyn.Resource(controller.KrypticSecretGVR).Namespace(namespace).
-		Update(context.Background(), obj, metav1.UpdateOptions{}); err != nil {
-		h.t.Fatal(err)
-	}
+	h.t.Fatalf("touch CR after retries: %v", last)
 }
 
 func (h *harness) waitReady(namespace, name string, want metav1.ConditionStatus, reason string) {
