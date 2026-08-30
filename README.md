@@ -82,8 +82,11 @@ The operator watches all namespaces by default; set `WATCH_NAMESPACE` to scope i
 go test ./...                    # reconciler unit tests (fake clientset)
 go build ./...
 
-# against a local cluster
+# section 17 QA against a real cluster (kind is enough)
 kind create cluster --name kryptic-test
+go test ./test/e2e -tags=e2e -count=1 -timeout 10m
+
+# run the operator by hand
 kubectl apply -f deploy/crd.yaml
 go run ./cmd/kryptic-operator -kubeconfig=$HOME/.kube/config -log-level=debug
 ```

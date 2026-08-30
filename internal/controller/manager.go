@@ -57,10 +57,8 @@ func (m *Manager) Run(ctx context.Context) error {
 
 // watch feeds the queue from the API server, restarting the watch when it drops.
 func (m *Manager) watch(ctx context.Context, queue workqueue.TypedRateLimitingInterface[queueItem]) {
-	resource := m.resource()
-
 	for ctx.Err() == nil {
-		watcher, err := resource.Watch(ctx, metav1.ListOptions{})
+		watcher, err := m.watched().Watch(ctx, metav1.ListOptions{})
 		if err != nil {
 			m.Log.Error("watch failed, retrying", "error", err)
 			select {
@@ -81,6 +79,9 @@ func (m *Manager) watch(ctx context.Context, queue workqueue.TypedRateLimitingIn
 			if event.Type == "DELETED" {
 				continue
 			}
+			if !m.accepts(object.GetNamespace()) {
+				continue
+			}
 			queue.Add(queueItem{namespace: object.GetNamespace(), name: object.GetName()})
 		}
 		m.Log.Info("watch channel closed, re-establishing")
@@ -88,6 +89,12 @@ func (m *Manager) watch(ctx context.Context, queue workqueue.TypedRateLimitingIn
 }
 
 func (m *Manager) reconcileOne(ctx context.Context, item queueItem) time.Duration {
+	if !m.accepts(item.namespace) {
+		m.Log.Debug("dropping KrypticSecret outside WATCH_NAMESPACE",
+			"namespace", item.namespace, "name", item.name, "watching", m.Namespace)
+		return 0
+	}
+
 	raw, err := m.resource().Namespace(item.namespace).Get(ctx, item.name, metav1.GetOptions{})
 	if err != nil {
 		// Deleted between enqueue and processing: nothing to do.
@@ -151,6 +158,21 @@ func (m *Manager) updateStatus(ctx context.Context, raw *unstructured.Unstructur
 
 func (m *Manager) resource() dynamic.NamespaceableResourceInterface {
 	return m.Dynamic.Resource(KrypticSecretGVR)
+}
+
+// watched is the list/watch client: cluster-wide when Namespace is empty,
+// otherwise only that namespace (WATCH_NAMESPACE / -namespace).
+func (m *Manager) watched() dynamic.ResourceInterface {
+	if m.Namespace != "" {
+		return m.resource().Namespace(m.Namespace)
+	}
+	return m.resource()
+}
+
+// accepts reports whether a KrypticSecret in namespace is in this manager's
+// watch scope. An empty Namespace watches every namespace.
+func (m *Manager) accepts(namespace string) bool {
+	return m.Namespace == "" || m.Namespace == namespace
 }
 
 // fromUnstructured decodes a CR through JSON so the typed struct stays the

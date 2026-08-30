@@ -21,6 +21,7 @@ native `Secret` objects.
 
 ```bash
 go test ./...
+go test ./test/e2e -tags=e2e -count=1 -timeout 10m   # needs kind or any cluster
 go build ./...
 ```
 
