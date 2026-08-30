@@ -52,13 +52,22 @@ type KrypticSecretSpec struct {
 	// credentials. Omit it only when the operator has cluster credentials
 	// (KRYPTIC_CLIENT_ID / KRYPTIC_CLIENT_SECRET). Per-namespace auth is the
 	// recommended production path.
-	Auth KrypticSecretAuth `json:"auth,omitempty"`
+	Auth *KrypticSecretAuth `json:"auth,omitempty"`
 	// Template customizes the produced Secret.
 	Template KrypticSecretTemplate `json:"template,omitempty"`
 }
 
 type KrypticSecretAuth struct {
 	SecretRef KrypticSecretRef `json:"secretRef"`
+}
+
+// AuthSecretName is the per-namespace credentials Secret, or empty when the
+// CR relies on optional cluster credentials.
+func (s KrypticSecretSpec) AuthSecretName() string {
+	if s.Auth == nil {
+		return ""
+	}
+	return s.Auth.SecretRef.Name
 }
 
 // KrypticSecretRef names a Secret in the same namespace holding the keys

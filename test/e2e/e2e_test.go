@@ -328,7 +328,7 @@ func (h *harness) cr(namespace, name, secretName string, keys []string) *control
 			SecretName:      secretName,
 			RefreshInterval: "30s",
 			Keys:            keys,
-			Auth:            controller.KrypticSecretAuth{SecretRef: controller.KrypticSecretRef{Name: "kryptic-machine-credentials"}},
+			Auth:            &controller.KrypticSecretAuth{SecretRef: controller.KrypticSecretRef{Name: "kryptic-machine-credentials"}},
 		},
 	}
 }

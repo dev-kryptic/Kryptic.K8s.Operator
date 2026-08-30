@@ -70,7 +70,7 @@ func testCR() *KrypticSecret {
 			ProjectID:   "proj_a1b2c3d4e5f6",
 			Environment: "production",
 			SecretName:  "backend-env",
-			Auth:        KrypticSecretAuth{SecretRef: KrypticSecretRef{Name: "creds"}},
+			Auth:        &KrypticSecretAuth{SecretRef: KrypticSecretRef{Name: "creds"}},
 		},
 	}
 }
@@ -355,7 +355,7 @@ func TestClusterCredentialsWhenAuthOmitted(t *testing.T) {
 	}
 
 	cr := testCR()
-	cr.Spec.Auth = KrypticSecretAuth{}
+	cr.Spec.Auth = nil
 
 	result := reconciler.Reconcile(context.Background(), cr)
 	if result.Condition.Status != metav1.ConditionTrue {
@@ -410,7 +410,7 @@ func TestMissingAuthAndNoClusterCredentials(t *testing.T) {
 	reconciler, _ := newReconciler(t, fetcher)
 
 	cr := testCR()
-	cr.Spec.Auth = KrypticSecretAuth{}
+	cr.Spec.Auth = nil
 
 	result := reconciler.Reconcile(context.Background(), cr)
 

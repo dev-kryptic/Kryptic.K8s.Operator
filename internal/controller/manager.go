@@ -206,7 +206,26 @@ func ToUnstructured(cr *KrypticSecret) (*unstructured.Unstructured, error) {
 	result := &unstructured.Unstructured{Object: object}
 	result.SetAPIVersion(APIVersion)
 	result.SetKind(Kind)
+	stripEmptyAuth(result.Object)
 	return result, nil
+}
+
+// stripEmptyAuth drops spec.auth when no secret name is set. encoding/json
+// omitempty does not skip zero structs, and the CRD rejects an empty name.
+func stripEmptyAuth(object map[string]any) {
+	spec, ok := object["spec"].(map[string]any)
+	if !ok {
+		return
+	}
+	auth, ok := spec["auth"].(map[string]any)
+	if !ok {
+		return
+	}
+	ref, _ := auth["secretRef"].(map[string]any)
+	name, _ := ref["name"].(string)
+	if name == "" {
+		delete(spec, "auth")
+	}
 }
 
 var _ runtime.Object = &unstructured.Unstructured{}

@@ -252,9 +252,15 @@ func TestQASection17_ClusterCredentials(t *testing.T) {
 		BaseURL:      h.platform.URL(),
 	})
 
-	cr := h.cr(ns, "cluster-auth-secrets", "cluster-auth-env", []string{"DATABASE_URL"})
-	cr.Spec.Auth = controller.KrypticSecretAuth{}
-	h.applyCR(cr)
+	if err := h.applyCRRaw(ns, "cluster-auth-secrets", map[string]any{
+		"projectId":       "proj_e2e000000001",
+		"environment":     "development",
+		"secretName":      "cluster-auth-env",
+		"refreshInterval": "30s",
+		"keys":            []string{"DATABASE_URL"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h.waitReady(ns, "cluster-auth-secrets", metav1.ConditionTrue, controller.ReasonSynced)
 	data := h.secretData(ns, "cluster-auth-env")
 	if data["DATABASE_URL"] == "" || data["REDIS_URL"] != "" {

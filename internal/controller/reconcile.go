@@ -86,7 +86,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cr *KrypticSecret) Result {
 // missing or incomplete is an error; it does not fall back to the cluster
 // identity.
 func (r *Reconciler) credentials(ctx context.Context, cr *KrypticSecret) (krypticapi.Credentials, error) {
-	name := cr.Spec.Auth.SecretRef.Name
+	name := cr.Spec.AuthSecretName()
 	if name != "" {
 		return r.credentialsFromSecret(ctx, cr.Namespace, name)
 	}
