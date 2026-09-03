@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,6 +16,9 @@ concurrency:
 jobs:
   unit:
     name: Unit tests
+    if: >
+      github.actor != 'github-actions[bot]' &&
+      github.actor != 'kryptic-release-bot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +38,9 @@ jobs:
 
   e2e:
     name: Operator QA (section 17)
+    if: >
+      github.actor != 'github-actions[bot]' &&
+      github.actor != 'kryptic-release-bot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -61,17 +68,28 @@ jobs:
   release:
     name: Tag and publish
     needs: [unit, e2e]
+    if: >
+      github.actor != 'github-actions[bot]' &&
+      github.actor != 'kryptic-release-bot[bot]'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       packages: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
       - name: Next version
@@ -92,22 +110,43 @@ jobs:
           echo "already_tagged=false" >> "$GITHUB_OUTPUT"
           echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
-      - name: Pin artifacts and tag
+      - name: Commit version bump
+        if: steps.version.outputs.already_tagged != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+          printf '%s\n' "$VERSION" > VERSION
+          sed -i "s|ghcr.io/dev-kryptic/kryptic-operator:[0-9][0-9.]*|ghcr.io/dev-kryptic/kryptic-operator:${VERSION}|" deploy/operator.yaml
+          if git diff --quiet -- VERSION deploy/operator.yaml; then
+            echo "already at ${VERSION}"
+            exit 0
+          fi
+          git add VERSION deploy/operator.yaml
+          git commit -m "chore: release ${VERSION}"
+          git push
+
+      - name: Tag
         if: steps.version.outputs.already_tagged != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
+          APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
-          # Do not push commits to main. Rulesets require a PR, signed commits,
-          # and status checks. Tag the SHA that already passed unit + e2e.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          printf '%s\n' "$VERSION" > VERSION
-          sed -i "s|ghcr.io/dev-kryptic/kryptic-operator:[0-9][0-9.]*|ghcr.io/dev-kryptic/kryptic-operator:${VERSION}|" deploy/operator.yaml
-
-          git tag -a "$TAG" -m "$TAG"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git fetch --tags --force
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists"
+            exit 0
+          fi
+          git tag -a "$TAG" -m "Release ${VERSION}"
           git push origin "$TAG"
 
       - name: Log in to GHCR
@@ -165,7 +204,7 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           NOTES_FILE: ${{ steps.notes.outputs.file }}

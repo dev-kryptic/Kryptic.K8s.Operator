@@ -36,11 +36,12 @@ go run ./cmd/kryptic-operator -kubeconfig=$HOME/.kube/config -log-level=debug
 ## Releasing
 
 A merge to `main` is the release. After unit tests and section 17 QA pass,
-the Release workflow tags that SHA as `vX.Y.Z` (patch, or minor / major if a
-commit since the last tag contains `#minor` or `#major`), pushes
+the Release workflow commits `VERSION` and `deploy/operator.yaml` as the
+Kryptic Release Bot, tags `vX.Y.Z` (patch, or minor / major if a commit since
+the last tag contains `#minor` or `#major`), pushes
 `ghcr.io/dev-kryptic/kryptic-operator:X.Y.Z`, and creates a GitHub Release
-with `crd.yaml` and `operator.yaml` pinned to that version. It does not push
-commits to `main`. A failing test skips the tag.
+with `crd.yaml` and `operator.yaml` pinned to that version. A failing test
+skips the tag.
 
 The first successful run on `main` ships `0.1.0` from `VERSION` without a bump.
 

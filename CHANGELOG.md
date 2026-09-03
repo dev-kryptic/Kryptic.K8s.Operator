@@ -4,9 +4,8 @@
 
 ### Changed
 
-- Release workflow tags the tested SHA and uploads pinned manifests. It no
-  longer pushes `chore(release)` commits to `main`, so branch rulesets stay
-  intact.
+- Release workflow commits `VERSION` and `deploy/operator.yaml` with the
+  Kryptic Release Bot, then tags `vX.Y.Z` and uploads pinned manifests.
 
 ### Added
 
