@@ -40,10 +40,14 @@ the Release workflow commits `VERSION` and `deploy/operator.yaml` as the
 Kryptic Release Bot, tags `vX.Y.Z` (patch, or minor / major if a commit since
 the last tag contains `#minor` or `#major`), pushes
 `ghcr.io/dev-kryptic/kryptic-operator:X.Y.Z`, and creates a GitHub Release
-with `crd.yaml` and `operator.yaml` pinned to that version. A failing test
+with `crd.yaml` and `operator.yaml` pinned to that version. Release notes
+come from the matching section in [CHANGELOG.md](CHANGELOG.md). A failing test
 skips the tag.
 
-The first successful run on `main` ships `0.1.0` from `VERSION` without a bump.
+Before merging release-worthy changes, move notes from **Unreleased** into a
+`## X.Y.Z` section so the release has a description.
+
+The first successful run on `main` ships `1.0.0` from `VERSION` without a bump.
 
 ## Licensing of contributions
 

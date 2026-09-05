@@ -19,7 +19,7 @@ import (
 	"github.com/dev-kryptic/k8s-operator/internal/krypticapi"
 )
 
-var version = "0.1.0"
+var version = "1.0.0"
 
 func main() {
 	var (

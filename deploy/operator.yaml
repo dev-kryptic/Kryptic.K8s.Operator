@@ -68,7 +68,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: operator
-          image: ghcr.io/dev-kryptic/kryptic-operator:0.1.0
+          image: ghcr.io/dev-kryptic/kryptic-operator:1.0.0
           args: ["-log-level=info"]
           env:
             # Empty watches every namespace; set to scope the operator.

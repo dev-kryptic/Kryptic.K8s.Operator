@@ -177,30 +177,21 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
 
-      - name: Release notes
+      - name: Release notes from CHANGELOG.md
         id: notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          TAG: ${{ steps.version.outputs.tag }}
-          NOTES: ${{ runner.temp }}/release-notes.md
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: |
           set -euo pipefail
-          last="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | awk -v cur="$TAG" '$0 != cur { print; exit }')"
+          python3 .github/scripts/release-notes-from-changelog.py
           {
-            echo "kryptic-operator ${VERSION}"
-            echo
             echo "Image: \`ghcr.io/dev-kryptic/kryptic-operator:${VERSION}\`"
             echo
-            if [[ -n "$last" ]]; then
-              echo "Changes since ${last}:"
-              echo
-              git log --pretty=format:'- %s' "${last}..${TAG}^0"
-              echo
-            else
-              echo "Initial release."
-            fi
-          } > "$NOTES"
-          echo "file=$NOTES" >> "$GITHUB_OUTPUT"
+            cat "$NOTES_FILE"
+          } > "${NOTES_FILE}.combined"
+          mv "${NOTES_FILE}.combined" "$NOTES_FILE"
+          echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:

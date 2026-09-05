@@ -10,7 +10,7 @@ if [[ -z "$last" ]]; then
   if [[ -f VERSION ]]; then
     version="$(tr -d '[:space:]' < VERSION)"
   else
-    version="0.1.0"
+    version="1.0.0"
   fi
   echo "version=$version"
   echo "bump=false"
