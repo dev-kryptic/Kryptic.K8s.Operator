@@ -35,20 +35,12 @@ go run ./cmd/kryptic-operator -kubeconfig=$HOME/.kube/config -log-level=debug
 
 ## Releasing
 
-A merge to `main` is the release. After unit tests and section 17 QA pass,
-the Release workflow commits `VERSION` and `deploy/operator.yaml` as the
-Kryptic Release Bot, tags `vX.Y.Z` (patch, or minor / major if a commit since
-the last tag contains `#minor` or `#major`), pushes
-`ghcr.io/dev-kryptic/kryptic-operator:X.Y.Z`, and creates a GitHub Release
-with `crd.yaml` and `operator.yaml` pinned to that version. Release notes
-come from the matching section in [CHANGELOG.md](CHANGELOG.md). A failing test
-skips the tag.
-
-Leave release-worthy notes under **Unreleased**. The publish workflow creates
-the `## X.Y.Z` section from that body if it is missing (or a one-line fallback)
-and commits it.
-
-The first successful run on `main` ships `1.0.0` from `VERSION` without a bump.
+Merges to `main` run unit tests and section 17 QA only. Publish by pushing a
+`vX.Y.Z` tag (or re-running the workflow with that tag). That tag is the
+image version (`ghcr.io/dev-kryptic/kryptic-operator:X.Y.Z`). A failing test
+skips the publish. Leave release-worthy notes under **Unreleased**. The
+publish job creates the `## X.Y.Z` section from that body if it is missing
+(or a one-line fallback).
 
 ## Licensing of contributions
 
