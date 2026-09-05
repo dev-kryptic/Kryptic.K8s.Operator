@@ -3,7 +3,7 @@ module github.com/dev-kryptic/k8s-operator
 go 1.25.0
 
 require (
-	github.com/dev-kryptic/Kryptic.Encryption.Go v1.0.0
+	github.com/dev-kryptic/Kryptic.Encryption.Go v1.0.2
 	k8s.io/api v0.32.3
 	k8s.io/apimachinery v0.32.3
 	k8s.io/client-go v0.32.3

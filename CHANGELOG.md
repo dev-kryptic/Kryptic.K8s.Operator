@@ -5,6 +5,10 @@ the GitHub Release (with the container image URL prepended).
 
 ## Unreleased
 
+### Changed
+
+- `github.com/dev-kryptic/Kryptic.Encryption.Go` v1.0.2.
+
 ## 1.0.0
 
 First production release of the Kubernetes operator.
