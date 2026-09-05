@@ -182,9 +182,18 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           NOTES_FILE: ${{ runner.temp }}/release-notes.md
+          APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
           python3 .github/scripts/release-notes-from-changelog.py
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git config user.name "${APP_SLUG}[bot]"
+            git config user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+            git add CHANGELOG.md
+            git commit -m "chore: add CHANGELOG section for ${VERSION}"
+            git push
+          fi
           {
             echo "Image: \`ghcr.io/dev-kryptic/kryptic-operator:${VERSION}\`"
             echo

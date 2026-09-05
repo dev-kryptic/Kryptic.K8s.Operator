@@ -44,8 +44,9 @@ with `crd.yaml` and `operator.yaml` pinned to that version. Release notes
 come from the matching section in [CHANGELOG.md](CHANGELOG.md). A failing test
 skips the tag.
 
-Before merging release-worthy changes, move notes from **Unreleased** into a
-`## X.Y.Z` section so the release has a description.
+Leave release-worthy notes under **Unreleased**. The publish workflow creates
+the `## X.Y.Z` section from that body if it is missing (or a one-line fallback)
+and commits it.
 
 The first successful run on `main` ships `1.0.0` from `VERSION` without a bump.
 
