@@ -5,10 +5,6 @@ the GitHub Release (with the container image URL prepended).
 
 ## Unreleased
 
-### Changed
-
-- `github.com/dev-kryptic/Kryptic.Encryption.Go` v1.0.2.
-
 ## 1.0.0
 
 First production release of the Kubernetes operator.
@@ -22,5 +18,7 @@ First production release of the Kubernetes operator.
 
 ### Changed
 
+- `github.com/dev-kryptic/Kryptic.Encryption.Go` v1.1.0; machine auth uses the
+  library's `ksm2_` derivation.
 - Release workflow commits `VERSION` and `deploy/operator.yaml` with the
   Kryptic Release Bot, then tags `vX.Y.Z` and uploads pinned manifests.
