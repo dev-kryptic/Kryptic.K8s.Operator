@@ -22,10 +22,13 @@ rules:
     resources: ["krypticsecrets/status"]
     verbs: ["get", "update", "patch"]
   # The Secrets it produces, and the credential Secrets it reads.
-  # Deliberately no "delete": cleanup happens via owner references.
+  # Deliberately no "delete": cleanup happens via owner references. Also no
+  # "list"/"watch" (a compromised operator could otherwise enumerate every
+  # Secret in the cluster) and no "patch": the controller only ever uses
+  # get, create and update on named Secrets.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "create", "update"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
@@ -78,6 +81,28 @@ spec:
             # one Secret in kryptic-system, then KrypticSecrets may omit
             # spec.auth. Per-namespace spec.auth.secretRef is the recommended
             # production path and always wins when set.
+            #
+            # Cluster credentials are opt-in per namespace. A KrypticSecret
+            # without spec.auth may use them only when its namespace is listed
+            # in KRYPTIC_CLUSTER_NAMESPACES (comma-separated; "*" is an
+            # explicit allow-all; empty or unset allows none). Without this
+            # gate, anyone who can create a KrypticSecret in any namespace
+            # could sync every project this identity decrypts into a Secret
+            # they control.
+            # - name: KRYPTIC_CLUSTER_NAMESPACES
+            #   value: "dev,staging"
+            #
+            # apiUrl values in credential Secrets must be https and their
+            # host[:port] must appear in this allowlist (empty means only the
+            # hosted default is accepted). This stops a Secret writer from
+            # pointing the operator's machine credentials at an arbitrary
+            # in-cluster or internal server (SSRF).
+            # - name: KRYPTIC_API_URL_ALLOWLIST
+            #   value: "pipelines.kryptic.example.com"
+            # Dev only: allow http:// apiUrl values.
+            # - name: KRYPTIC_ALLOW_INSECURE_API_URL
+            #   value: "true"
+            #
             # Create the Secret, then uncomment:
             #   kubectl create secret generic kryptic-machine-credentials \
             #     --namespace kryptic-system \

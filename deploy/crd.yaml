@@ -53,6 +53,8 @@ spec:
                   type: string
                   description: Environment slug (development, staging, production, …).
                   minLength: 1
+                  maxLength: 63
+                  pattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
                 secretName:
                   type: string
                   description: Target Kubernetes Secret. Defaults to the KrypticSecret's name.

@@ -51,13 +51,17 @@ func main() {
 
 	cluster := controller.ClusterCredentialsFromEnv()
 
+	fetcher := krypticapi.NewClient()
+	fetcher.Log = logger
+
 	manager := &controller.Manager{
 		Dynamic: dynamicClient,
 		Reconciler: &controller.Reconciler{
 			Kube:    kubeClient,
-			Fetcher: krypticapi.NewClient(),
+			Fetcher: fetcher,
 			Log:     logger,
 			Cluster: cluster,
+			APIURL:  controller.APIURLPolicyFromEnv(),
 		},
 		Namespace: *namespace,
 		Log:       logger,

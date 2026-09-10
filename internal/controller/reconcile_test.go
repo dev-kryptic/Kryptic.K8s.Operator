@@ -213,11 +213,49 @@ func TestSelfHostedApiUrlIsHonored(t *testing.T) {
 	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
 	reconciler, _ := newReconciler(t, fetcher,
 		credentialsSecret("default", "creds", map[string]string{"apiUrl": "https://pipelines.internal"}))
+	reconciler.APIURL = APIURLPolicy{AllowedHosts: []string{"pipelines.internal"}}
 
 	reconciler.Reconcile(context.Background(), testCR())
 
 	if fetcher.gotCredentials.BaseURL != "https://pipelines.internal" {
 		t.Fatalf("base url = %q, want the self-hosted override", fetcher.gotCredentials.BaseURL)
+	}
+}
+
+func TestApiUrlOutsideAllowlistIsRejected(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher,
+		credentialsSecret("default", "creds", map[string]string{"apiUrl": "https://attacker.internal"}))
+
+	result := reconciler.Reconcile(context.Background(), testCR())
+
+	if result.Condition.Reason != ReasonAuthSecret {
+		t.Fatalf("expected AuthSecretInvalid, got %s/%s", result.Condition.Status, result.Condition.Reason)
+	}
+	if fetcher.calls != 0 {
+		t.Fatal("fetched from a non-allowlisted apiUrl")
+	}
+}
+
+func TestHttpApiUrlIsRejectedWithoutInsecureFlag(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher,
+		credentialsSecret("default", "creds", map[string]string{"apiUrl": "http://pipelines.internal"}))
+	reconciler.APIURL = APIURLPolicy{AllowedHosts: []string{"pipelines.internal"}}
+
+	result := reconciler.Reconcile(context.Background(), testCR())
+
+	if result.Condition.Reason != ReasonAuthSecret {
+		t.Fatalf("expected AuthSecretInvalid, got %s/%s", result.Condition.Status, result.Condition.Reason)
+	}
+	if fetcher.calls != 0 {
+		t.Fatal("fetched over plain http without the insecure flag")
+	}
+
+	reconciler.APIURL.AllowInsecure = true
+	result = reconciler.Reconcile(context.Background(), testCR())
+	if result.Condition.Status != metav1.ConditionTrue {
+		t.Fatalf("insecure flag should allow http in dev: %s", result.Condition.Message)
 	}
 }
 
@@ -254,7 +292,7 @@ func TestIncompleteCredentialsSecretIsNotReady(t *testing.T) {
 }
 
 func TestPermanentApiErrorBacksOffHard(t *testing.T) {
-	fetcher := &stubFetcher{err: &krypticapi.APIError{Status: 404, Message: "Unknown project."}}
+	fetcher := &stubFetcher{err: &krypticapi.APIError{Status: 404}}
 	reconciler, kube := newReconciler(t, fetcher, credentialsSecret("default", "creds", nil))
 
 	result := reconciler.Reconcile(context.Background(), testCR())
@@ -352,6 +390,7 @@ func TestClusterCredentialsWhenAuthOmitted(t *testing.T) {
 		ClientID:     "kmi_cluster",
 		ClientSecret: "cluster-secret",
 		BaseURL:      "https://pipelines.internal",
+		Namespaces:   []string{"default"},
 	}
 
 	cr := testCR()
@@ -405,6 +444,46 @@ func TestNamedSecretDoesNotFallBackToCluster(t *testing.T) {
 	}
 }
 
+func TestClusterCredentialsRefusedOutsideAllowedNamespaces(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher)
+	reconciler.Cluster = ClusterCredentials{
+		ClientID:     "kmi_cluster",
+		ClientSecret: "cluster-secret",
+		Namespaces:   []string{"dev"}, // not "default"
+	}
+
+	cr := testCR()
+	cr.Spec.Auth = nil
+
+	result := reconciler.Reconcile(context.Background(), cr)
+
+	if result.Condition.Reason != ReasonAuthSecret {
+		t.Fatalf("expected AuthSecretInvalid, got %s/%s", result.Condition.Status, result.Condition.Reason)
+	}
+	if fetcher.calls != 0 {
+		t.Fatal("used cluster credentials from a namespace outside KRYPTIC_CLUSTER_NAMESPACES")
+	}
+}
+
+func TestClusterCredentialsWildcardAllowsEveryNamespace(t *testing.T) {
+	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
+	reconciler, _ := newReconciler(t, fetcher)
+	reconciler.Cluster = ClusterCredentials{
+		ClientID:     "kmi_cluster",
+		ClientSecret: "cluster-secret",
+		Namespaces:   []string{"*"},
+	}
+
+	cr := testCR()
+	cr.Spec.Auth = nil
+
+	result := reconciler.Reconcile(context.Background(), cr)
+	if result.Condition.Status != metav1.ConditionTrue {
+		t.Fatalf("wildcard should allow any namespace: %s", result.Condition.Message)
+	}
+}
+
 func TestMissingAuthAndNoClusterCredentials(t *testing.T) {
 	fetcher := &stubFetcher{bundle: krypticapi.Bundle{"K": "v"}}
 	reconciler, _ := newReconciler(t, fetcher)
@@ -426,6 +505,7 @@ func TestClusterCredentialsFromEnv(t *testing.T) {
 	t.Setenv(EnvClientID, "kmi_env")
 	t.Setenv(EnvClientSecret, "env-secret")
 	t.Setenv(EnvAPIURL, "https://pipelines.env")
+	t.Setenv(EnvClusterNamespaces, " dev, staging ,")
 
 	got := ClusterCredentialsFromEnv()
 	if !got.Configured() {
@@ -434,6 +514,16 @@ func TestClusterCredentialsFromEnv(t *testing.T) {
 	creds := got.Credentials()
 	if creds.ClientID != "kmi_env" || creds.ClientSecret != "env-secret" || creds.BaseURL != "https://pipelines.env" {
 		t.Fatalf("unexpected credentials: %+v", creds)
+	}
+	if !got.AllowsNamespace("dev") || !got.AllowsNamespace("staging") || got.AllowsNamespace("prod") {
+		t.Fatalf("namespace list parsed wrong: %+v", got.Namespaces)
+	}
+}
+
+func TestClusterCredentialsAllowNoNamespaceByDefault(t *testing.T) {
+	credentials := ClusterCredentials{ClientID: "kmi", ClientSecret: "s"}
+	if credentials.AllowsNamespace("default") {
+		t.Fatal("an empty KRYPTIC_CLUSTER_NAMESPACES must allow no namespace")
 	}
 }
 

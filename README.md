@@ -55,6 +55,12 @@ kubectl create secret generic kryptic-machine-credentials \
 ```
 
 Self-hosted platforms add `--from-literal=apiUrl=https://pipelines.kryptic.example.com`.
+The operator only accepts `apiUrl` values that use https and whose `host[:port]`
+is listed in the `KRYPTIC_API_URL_ALLOWLIST` operator env (comma-separated;
+empty means only the hosted default). Anyone who can write a Secret in a
+watched namespace controls `apiUrl`, so an unchecked value would let them point
+the operator's machine credentials at an arbitrary internal server (SSRF).
+For local development only, `KRYPTIC_ALLOW_INSECURE_API_URL=true` permits http.
 
 `deploy/example.yaml` is a complete working example including a Deployment that
 consumes the produced Secret.
@@ -64,7 +70,9 @@ consumes the produced Secret.
 For non-production clusters you can set one machine identity on the operator
 instead of a Secret in every namespace. Create the Secret once in
 `kryptic-system`, uncomment the `KRYPTIC_CLIENT_ID` / `KRYPTIC_CLIENT_SECRET`
-env block in `deploy/operator.yaml`, and omit `spec.auth` on the CR:
+env block in `deploy/operator.yaml`, list the namespaces that may use it in
+`KRYPTIC_CLUSTER_NAMESPACES` (comma-separated; `"*"` is an explicit allow-all;
+empty or unset allows none), and omit `spec.auth` on the CR:
 
 ```yaml
 apiVersion: kryptic.dev/v1
@@ -88,11 +96,16 @@ Self-hosted platforms add `--from-literal=apiUrl=...`. The operator reads that
 as `KRYPTIC_API_URL`.
 
 This is a convenience for labs and single-operator clusters. It is not the
-recommended production path: every `KrypticSecret` in the cluster then shares
-one identity, so a leak or a curious CR can read any project that identity can
-decrypt. When `spec.auth.secretRef` is set, that namespace Secret always wins
-and a missing or incomplete named Secret does not fall back to the cluster
-identity.
+recommended production path: every `KrypticSecret` in an allowed namespace then
+shares one identity, so a leak or a curious CR can read any project that
+identity can decrypt. That is exactly why the identity is opt-in per namespace:
+without the `KRYPTIC_CLUSTER_NAMESPACES` gate, anyone who can create a
+`KrypticSecret` in any namespace could sync every project the cluster identity
+decrypts into a Secret they control. A `KrypticSecret` without `spec.auth` in
+a namespace outside the list fails with a status message telling the admin to
+either add the namespace to `KRYPTIC_CLUSTER_NAMESPACES` or set `spec.auth`.
+When `spec.auth.secretRef` is set, that namespace Secret always wins and a
+missing or incomplete named Secret does not fall back to the cluster identity.
 
 ## Behavior
 

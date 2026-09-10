@@ -13,7 +13,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +50,11 @@ type Fetcher interface {
 // credential is enough).
 type Client struct {
 	HTTP *http.Client
+	// Log receives response bodies from failed requests. The base URL can
+	// come from a user-writable credentials Secret, so bodies never reach CR
+	// status (where any namespace reader would see the reflected response);
+	// they go to the operator log only.
+	Log *slog.Logger
 
 	mu        sync.Mutex
 	tokens    map[string]cachedToken
@@ -95,13 +102,17 @@ type cipherBundle struct {
 
 // APIError carries the status code so the reconciler can distinguish
 // "misconfigured" (401/403/404 - do not hammer) from transient failures.
+// It deliberately carries no response body: Error() lands in CR status, and
+// the response may come from a URL a Secret writer chose.
 type APIError struct {
-	Status  int
-	Message string
+	Status int
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("kryptic api: %d %s", e.Status, e.Message)
+	if e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden {
+		return fmt.Sprintf("kryptic api: authentication failed (HTTP %d)", e.Status)
+	}
+	return fmt.Sprintf("kryptic api: request failed (HTTP %d)", e.Status)
 }
 
 // Permanent reports whether retrying without a spec change is pointless.
@@ -123,7 +134,8 @@ func (c *Client) Fetch(ctx context.Context, creds Credentials, projectID, enviro
 	}
 
 	var bundle cipherBundle
-	path := fmt.Sprintf("/api/secrets/bundle?projectPublicId=%s&environment=%s", projectID, environment)
+	query := url.Values{"projectPublicId": {projectID}, "environment": {environment}}
+	path := "/api/secrets/bundle?" + query.Encode()
 	if err := c.get(ctx, creds, token, path, &bundle); err != nil {
 		return nil, err
 	}
@@ -219,7 +231,8 @@ func (c *Client) get(ctx context.Context, creds Credentials, token, path string,
 		if response.StatusCode == http.StatusUnauthorized {
 			c.invalidate(creds.ClientID)
 		}
-		return &APIError{Status: response.StatusCode, Message: readMessage(response)}
+		c.logFailure(path, response.StatusCode, readBody(response))
+		return &APIError{Status: response.StatusCode}
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
@@ -236,8 +249,15 @@ func (c *Client) token(ctx context.Context, creds Credentials) (string, error) {
 	}
 	c.mu.Unlock()
 
+	// v2 secrets ("ksm2_" prefix) are never sent raw: the wire carries the
+	// domain-separated auth derivation, so the platform never sees the value
+	// that unwraps the machine private key.
+	authSecret, err := kdf.MachineAuthSecret(creds.ClientSecret)
+	if err != nil {
+		return "", err
+	}
 	payload, _ := json.Marshal(map[string]string{
-		"clientId": creds.ClientID, "clientSecret": creds.ClientSecret,
+		"clientId": creds.ClientID, "clientSecret": authSecret,
 	})
 
 	base := strings.TrimSuffix(creds.BaseURL, "/")
@@ -254,7 +274,8 @@ func (c *Client) token(ctx context.Context, creds Credentials) (string, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return "", &APIError{Status: response.StatusCode, Message: readMessage(response)}
+		c.logFailure("/api/token", response.StatusCode, readBody(response))
+		return "", &APIError{Status: response.StatusCode}
 	}
 
 	var token struct {
@@ -281,7 +302,17 @@ func (c *Client) invalidate(clientID string) {
 	c.mu.Unlock()
 }
 
-func readMessage(response *http.Response) string {
+// logFailure keeps raw response bodies out of CR status and records them for
+// the operator admin instead.
+func (c *Client) logFailure(path string, status int, body string) {
+	logger := c.Log
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("kryptic api request failed", "path", path, "status", status, "body", body)
+}
+
+func readBody(response *http.Response) string {
 	buffer := make([]byte, 512)
 	n, _ := response.Body.Read(buffer)
 	return strings.TrimSpace(string(buffer[:n]))

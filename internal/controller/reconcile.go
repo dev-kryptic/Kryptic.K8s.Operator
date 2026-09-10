@@ -32,6 +32,7 @@ type Reconciler struct {
 	Fetcher krypticapi.Fetcher
 	Log     *slog.Logger
 	Cluster ClusterCredentials
+	APIURL  APIURLPolicy
 }
 
 // Result reports what the reconcile did and when to come back.
@@ -82,7 +83,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, cr *KrypticSecret) Result {
 }
 
 // credentials prefers spec.auth.secretRef in the CR's namespace. If that name
-// is empty, it uses optional cluster credentials. A named Secret that is
+// is empty, it uses optional cluster credentials, but only in namespaces the
+// operator admin listed in KRYPTIC_CLUSTER_NAMESPACES. A named Secret that is
 // missing or incomplete is an error; it does not fall back to the cluster
 // identity.
 func (r *Reconciler) credentials(ctx context.Context, cr *KrypticSecret) (krypticapi.Credentials, error) {
@@ -91,6 +93,11 @@ func (r *Reconciler) credentials(ctx context.Context, cr *KrypticSecret) (krypti
 		return r.credentialsFromSecret(ctx, cr.Namespace, name)
 	}
 	if r.Cluster.Configured() {
+		if !r.Cluster.AllowsNamespace(cr.Namespace) {
+			return krypticapi.Credentials{}, fmt.Errorf(
+				"namespace %q may not use the operator's cluster credentials: "+
+					"add it to KRYPTIC_CLUSTER_NAMESPACES on the operator, or set spec.auth", cr.Namespace)
+		}
 		return r.Cluster.Credentials(), nil
 	}
 	return krypticapi.Credentials{}, errors.New(
@@ -114,6 +121,8 @@ func (r *Reconciler) credentialsFromSecret(ctx context.Context, namespace, name 
 	baseURL := string(secret.Data["apiUrl"])
 	if baseURL == "" {
 		baseURL = krypticapi.DefaultBaseURL
+	} else if err := r.APIURL.Validate(baseURL); err != nil {
+		return krypticapi.Credentials{}, fmt.Errorf("credentials secret %q: %w", name, err)
 	}
 
 	return krypticapi.Credentials{BaseURL: baseURL, ClientID: clientID, ClientSecret: clientSecret}, nil
