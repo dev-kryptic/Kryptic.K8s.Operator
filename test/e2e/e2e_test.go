@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -31,6 +33,76 @@ import (
 
 var crdGVR = schema.GroupVersionResource{
 	Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+}
+
+const (
+	inClusterOperatorNamespace = "kryptic-system"
+	inClusterOperatorName      = "kryptic-operator"
+	inClusterOperatorSelector  = "app.kubernetes.io/name=kryptic-operator"
+)
+
+func TestMain(m *testing.M) {
+	replicas, kube, ok := pauseInClusterOperator()
+	code := m.Run()
+	if ok {
+		restoreInClusterOperator(kube, replicas)
+	}
+	os.Exit(code)
+}
+
+func pauseInClusterOperator() (int32, kubernetes.Interface, bool) {
+	config, err := loadKubeconfig()
+	if err != nil {
+		return 0, nil, false
+	}
+	kube, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return 0, nil, false
+	}
+	ctx := context.Background()
+	scale, err := kube.AppsV1().Deployments(inClusterOperatorNamespace).
+		GetScale(ctx, inClusterOperatorName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return 0, kube, false
+	}
+	if err != nil {
+		return 0, nil, false
+	}
+	previous := scale.Spec.Replicas
+	if previous == 0 {
+		return 0, kube, false
+	}
+	scale.Spec.Replicas = 0
+	if _, err := kube.AppsV1().Deployments(inClusterOperatorNamespace).
+		UpdateScale(ctx, inClusterOperatorName, scale, metav1.UpdateOptions{}); err != nil {
+		return 0, nil, false
+	}
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		pods, err := kube.CoreV1().Pods(inClusterOperatorNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: inClusterOperatorSelector,
+		})
+		if err == nil && len(pods.Items) == 0 {
+			return previous, kube, true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return previous, kube, true
+}
+
+func restoreInClusterOperator(kube kubernetes.Interface, replicas int32) {
+	if kube == nil || replicas == 0 {
+		return
+	}
+	ctx := context.Background()
+	scale, err := kube.AppsV1().Deployments(inClusterOperatorNamespace).
+		GetScale(ctx, inClusterOperatorName, metav1.GetOptions{})
+	if err != nil {
+		return
+	}
+	scale.Spec.Replicas = replicas
+	_, _ = kube.AppsV1().Deployments(inClusterOperatorNamespace).
+		UpdateScale(ctx, inClusterOperatorName, scale, metav1.UpdateOptions{})
 }
 
 type harness struct {
@@ -65,8 +137,23 @@ func setup(t *testing.T) *harness {
 	t.Cleanup(platform.Close)
 
 	h := &harness{t: t, cfg: config, kube: kube, dyn: dyn, platform: platform}
+	h.assertNoInClusterOperator()
 	h.applyCRD()
 	return h
+}
+
+func (h *harness) assertNoInClusterOperator() {
+	h.t.Helper()
+	pods, err := h.kube.CoreV1().Pods(inClusterOperatorNamespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: inClusterOperatorSelector,
+	})
+	if err != nil {
+		return
+	}
+	if len(pods.Items) > 0 {
+		h.t.Fatalf("in-cluster %s is still running (%d pod(s)); e2e pauses it in TestMain so the in-process manager is the only reconciler",
+			inClusterOperatorName, len(pods.Items))
+	}
 }
 
 func loadKubeconfig() (*rest.Config, error) {
@@ -149,13 +236,27 @@ func (h *harness) startOperatorWith(namespace string, cluster controller.Cluster
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Mirror a dev deployment: the fake platform is plain http on localhost,
+	// which the SSRF policy only accepts with the insecure switch and an
+	// explicit host allowlist (KRYPTIC_ALLOW_INSECURE_API_URL /
+	// KRYPTIC_API_URL_ALLOWLIST on a real operator).
+	platformURL, err := url.Parse(h.platform.URL())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	fetcher := krypticapi.NewClient()
+	fetcher.HTTP.Transport = &http.Transport{DisableKeepAlives: true}
 	manager := &controller.Manager{
 		Dynamic: h.dyn,
 		Reconciler: &controller.Reconciler{
 			Kube:    h.kube,
-			Fetcher: krypticapi.NewClient(),
+			Fetcher: fetcher,
 			Log:     logger,
 			Cluster: cluster,
+			APIURL: controller.APIURLPolicy{
+				AllowInsecure: true,
+				AllowedHosts:  []string{platformURL.Host},
+			},
 		},
 		Namespace: namespace,
 		Log:       logger,

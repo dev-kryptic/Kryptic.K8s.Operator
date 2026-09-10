@@ -5,6 +5,17 @@ the GitHub Release (with the container image URL prepended).
 
 ## Unreleased
 
+## 1.1.0 - 2026-09-10
+
+### Fixed
+
+- Status writes no longer echo through the watch into a reconcile loop, which
+  dropped `syncedKeyCount` and left `Ready` flapping under load.
+- The manager shuts its work queue when the run context is cancelled, so a
+  cluster-wide operator cannot keep reconciling after shutdown.
+- Transient fetch failures keep the last `syncedKeyCount` instead of resetting
+  it to zero.
+
 ## 1.0.0
 
 First production release of the Kubernetes operator.

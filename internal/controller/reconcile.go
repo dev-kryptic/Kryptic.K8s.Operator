@@ -51,7 +51,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cr *KrypticSecret) Result {
 
 	creds, err := r.credentials(ctx, cr)
 	if err != nil {
-		return failed(ReasonAuthSecret, err.Error(), interval)
+		return failed(ReasonAuthSecret, err.Error(), interval, cr.Status.SyncedKeyCount)
 	}
 
 	bundle, err := r.Fetcher.Fetch(ctx, creds, cr.Spec.ProjectID, cr.Spec.Environment)
@@ -59,15 +59,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, cr *KrypticSecret) Result {
 		var apiError *krypticapi.APIError
 		if errors.As(err, &apiError) && apiError.Permanent() {
 			// Misconfiguration: back off hard instead of hammering the platform.
-			return failed(ReasonPermanentError, apiError.Error(), longBackoff(interval))
+			return failed(ReasonPermanentError, apiError.Error(), longBackoff(interval), cr.Status.SyncedKeyCount)
 		}
-		return failed(ReasonFetchFailed, err.Error(), shortBackoff(interval))
+		return failed(ReasonFetchFailed, err.Error(), shortBackoff(interval), cr.Status.SyncedKeyCount)
 	}
 
 	data := selectKeys(bundle, cr.Spec.Keys)
 
 	if err := r.applySecret(ctx, cr, data); err != nil {
-		return failed(ReasonSecretWriteFail, err.Error(), shortBackoff(interval))
+		return failed(ReasonSecretWriteFail, err.Error(), shortBackoff(interval), cr.Status.SyncedKeyCount)
 	}
 
 	return Result{
@@ -231,9 +231,10 @@ func secretType(raw string) corev1.SecretType {
 	return corev1.SecretType(raw)
 }
 
-func failed(reason, message string, requeueAfter time.Duration) Result {
+func failed(reason, message string, requeueAfter time.Duration, syncedKeys int) Result {
 	return Result{
 		RequeueAfter: requeueAfter,
+		SyncedKeys:   syncedKeys,
 		Condition: metav1.Condition{
 			Type:    ConditionReady,
 			Status:  metav1.ConditionFalse,

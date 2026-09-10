@@ -314,6 +314,7 @@ func TestTransientErrorRetriesSooner(t *testing.T) {
 
 	cr := testCR()
 	cr.Spec.RefreshInterval = "20m"
+	cr.Status.SyncedKeyCount = 3
 
 	result := reconciler.Reconcile(context.Background(), cr)
 
@@ -322,6 +323,9 @@ func TestTransientErrorRetriesSooner(t *testing.T) {
 	}
 	if result.RequeueAfter != 5*time.Minute {
 		t.Fatalf("requeue after %s, want a quarter of the interval", result.RequeueAfter)
+	}
+	if result.SyncedKeys != 3 {
+		t.Fatalf("transient failure reset syncedKeyCount to %d", result.SyncedKeys)
 	}
 }
 

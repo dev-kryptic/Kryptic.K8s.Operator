@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/dev-kryptic/k8s-operator/internal/controller"
 )
@@ -104,18 +105,25 @@ func TestQASection17(t *testing.T) {
 	})
 
 	t.Run("17.14_status_columns", func(t *testing.T) {
-		obj, err := h.dyn.Resource(controller.KrypticSecretGVR).Namespace(ns).
-			Get(context.Background(), "backend-secrets", metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
+		deadline := time.Now().Add(10 * time.Second)
+		var project, env, status, reason string
+		var count int64
+		for time.Now().Before(deadline) {
+			obj, err := h.dyn.Resource(controller.KrypticSecretGVR).Namespace(ns).
+				Get(context.Background(), "backend-secrets", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			project, _, _ = unstructuredString(obj.Object, "spec", "projectId")
+			env, _, _ = unstructuredString(obj.Object, "spec", "environment")
+			count, _, _ = unstructuredInt(obj.Object, "status", "syncedKeyCount")
+			status, reason = h.ready(ns, "backend-secrets")
+			if project == "proj_e2e000000001" && env == "development" && count >= 1 && status == "True" && reason == controller.ReasonSynced {
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
-		project, _, _ := unstructuredString(obj.Object, "spec", "projectId")
-		env, _, _ := unstructuredString(obj.Object, "spec", "environment")
-		count, _, _ := unstructuredInt(obj.Object, "status", "syncedKeyCount")
-		status, reason := h.ready(ns, "backend-secrets")
-		if project != "proj_e2e000000001" || env != "development" || count < 1 || status != "True" || reason != controller.ReasonSynced {
-			t.Fatalf("columns: project=%s env=%s keys=%d ready=%s/%s", project, env, count, status, reason)
-		}
+		t.Fatalf("columns: project=%s env=%s keys=%d ready=%s/%s", project, env, count, status, reason)
 	})
 
 	t.Run("17.15_self_hosted_api_url", func(t *testing.T) {
@@ -250,6 +258,9 @@ func TestQASection17_ClusterCredentials(t *testing.T) {
 		ClientID:     platformClientID,
 		ClientSecret: platformClientSecret,
 		BaseURL:      h.platform.URL(),
+		// Cluster credentials are opt-in per namespace since the operator
+		// stopped defaulting to allow-all (KRYPTIC_CLUSTER_NAMESPACES).
+		Namespaces: []string{ns},
 	})
 
 	if err := h.applyCRRaw(ns, "cluster-auth-secrets", map[string]any{
@@ -285,23 +296,5 @@ func unstructuredString(obj map[string]any, fields ...string) (string, bool, err
 }
 
 func unstructuredInt(obj map[string]any, fields ...string) (int64, bool, error) {
-	cur := any(obj)
-	for _, field := range fields {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return 0, false, nil
-		}
-		cur, ok = m[field]
-		if !ok {
-			return 0, false, nil
-		}
-	}
-	switch n := cur.(type) {
-	case int64:
-		return n, true, nil
-	case float64:
-		return int64(n), true, nil
-	default:
-		return 0, false, nil
-	}
+	return unstructured.NestedInt64(obj, fields...)
 }

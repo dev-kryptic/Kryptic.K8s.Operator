@@ -21,6 +21,39 @@ func TestAcceptsNamespaceScope(t *testing.T) {
 	}
 }
 
+func TestStatusUnchangedSkipsNoOpWrites(t *testing.T) {
+	cr := &KrypticSecret{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend-secrets", Generation: 2},
+		Status: KrypticSecretStatus{
+			ObservedGeneration: 2,
+			SyncedKeyCount:     3,
+			Conditions: []metav1.Condition{{
+				Type:    ConditionReady,
+				Status:  metav1.ConditionTrue,
+				Reason:  ReasonSynced,
+				Message: `Synced 3 key(s) into secret "backend-env"`,
+			}},
+		},
+	}
+	result := Result{
+		SyncedKeys: 3,
+		Condition: metav1.Condition{
+			Type:    ConditionReady,
+			Status:  metav1.ConditionTrue,
+			Reason:  ReasonSynced,
+			Message: `Synced 3 key(s) into secret "backend-env"`,
+		},
+	}
+	if !statusUnchanged(cr, result) {
+		t.Fatal("identical Ready/Synced status must not be rewritten")
+	}
+
+	result.SyncedKeys = 2
+	if statusUnchanged(cr, result) {
+		t.Fatal("a changed key count must be written")
+	}
+}
+
 func TestToUnstructuredOmitsEmptyAuth(t *testing.T) {
 	cr := &KrypticSecret{
 		ObjectMeta: metav1.ObjectMeta{Name: "backend-secrets", Namespace: "default"},
