@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -64,9 +65,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, cr *KrypticSecret) Result {
 		return failed(ReasonFetchFailed, err.Error(), shortBackoff(interval), cr.Status.SyncedKeyCount)
 	}
 
+	leaseIDs := readLeaseIDs(ctx, r, cr)
+	if dynamic, ok := r.Fetcher.(krypticapi.DynamicFetcher); ok {
+		extra, next, syncErr := dynamic.SyncDynamic(ctx, creds, cr.Spec.ProjectID, cr.Spec.Environment, leaseIDs)
+		if syncErr != nil {
+			var apiError *krypticapi.APIError
+			if errors.As(syncErr, &apiError) && apiError.Permanent() {
+				return failed(ReasonPermanentError, syncErr.Error(), longBackoff(interval), cr.Status.SyncedKeyCount)
+			}
+			return failed(ReasonFetchFailed, syncErr.Error(), shortBackoff(interval), cr.Status.SyncedKeyCount)
+		}
+		for key, value := range extra {
+			bundle[key] = value
+		}
+		leaseIDs = next
+	}
+
 	data := selectKeys(bundle, cr.Spec.Keys)
 
-	if err := r.applySecret(ctx, cr, data); err != nil {
+	if err := r.applySecret(ctx, cr, data, leaseIDs); err != nil {
 		return failed(ReasonSecretWriteFail, err.Error(), shortBackoff(interval), cr.Status.SyncedKeyCount)
 	}
 
@@ -130,7 +147,7 @@ func (r *Reconciler) credentialsFromSecret(ctx context.Context, namespace, name 
 
 // applySecret creates or updates the target Secret, taking ownership so it is
 // garbage-collected with the CR.
-func (r *Reconciler) applySecret(ctx context.Context, cr *KrypticSecret, data map[string][]byte) error {
+func (r *Reconciler) applySecret(ctx context.Context, cr *KrypticSecret, data map[string][]byte, leaseIDs map[string]string) error {
 	name := cr.TargetSecretName()
 	secrets := r.Kube.CoreV1().Secrets(cr.Namespace)
 
@@ -139,7 +156,7 @@ func (r *Reconciler) applySecret(ctx context.Context, cr *KrypticSecret, data ma
 			Name:        name,
 			Namespace:   cr.Namespace,
 			Labels:      mergeLabels(cr.Spec.Template.Labels),
-			Annotations: cr.Spec.Template.Annotations,
+			Annotations: withLeaseIDs(cr.Spec.Template.Annotations, leaseIDs),
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         APIVersion,
 				Kind:               Kind,
@@ -222,6 +239,61 @@ func mergeInto(target, source map[string]string) map[string]string {
 		target[key] = value
 	}
 	return target
+}
+
+// RevokeCRLeases drops provider roles this CR minted. Called while the
+// finalizer still holds the object so the Secret annotation is readable.
+func (r *Reconciler) RevokeCRLeases(ctx context.Context, cr *KrypticSecret) error {
+	dynamic, ok := r.Fetcher.(krypticapi.DynamicFetcher)
+	if !ok {
+		return nil
+	}
+	ids := readLeaseIDs(ctx, r, cr)
+	if len(ids) == 0 {
+		return nil
+	}
+	creds, err := r.credentials(ctx, cr)
+	if err != nil {
+		return err
+	}
+	var list []string
+	for _, id := range ids {
+		list = append(list, id)
+	}
+	return dynamic.RevokeLeases(ctx, creds, list)
+}
+
+func readLeaseIDs(ctx context.Context, r *Reconciler, cr *KrypticSecret) map[string]string {
+	secret, err := r.Kube.CoreV1().Secrets(cr.Namespace).Get(ctx, cr.TargetSecretName(), metav1.GetOptions{})
+	if err != nil {
+		return map[string]string{}
+	}
+	raw := secret.Annotations[LeaseIDsAnnotation]
+	if raw == "" {
+		return map[string]string{}
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]string{}
+	}
+	return out
+}
+
+func withLeaseIDs(base map[string]string, leaseIDs map[string]string) map[string]string {
+	out := map[string]string{}
+	for key, value := range base {
+		out[key] = value
+	}
+	if len(leaseIDs) == 0 {
+		delete(out, LeaseIDsAnnotation)
+		return out
+	}
+	encoded, err := json.Marshal(leaseIDs)
+	if err != nil {
+		return out
+	}
+	out[LeaseIDsAnnotation] = string(encoded)
+	return out
 }
 
 func secretType(raw string) corev1.SecretType {

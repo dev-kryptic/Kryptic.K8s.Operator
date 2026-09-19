@@ -135,6 +135,25 @@ func (m *Manager) reconcileOne(ctx context.Context, item queueItem) time.Duratio
 		return time.Minute
 	}
 
+	if cr.DeletionTimestamp != nil && !cr.DeletionTimestamp.IsZero() {
+		if err := m.Reconciler.RevokeCRLeases(ctx, cr); err != nil {
+			m.Log.Error("revoke on delete failed", "namespace", cr.Namespace, "name", cr.Name, "error", err)
+			return shortBackoff(DefaultRefreshInterval)
+		}
+		if err := m.setFinalizer(ctx, raw, cr, false); err != nil {
+			m.Log.Error("remove finalizer failed", "namespace", cr.Namespace, "name", cr.Name, "error", err)
+			return shortBackoff(DefaultRefreshInterval)
+		}
+		return 0
+	}
+
+	if !hasFinalizer(cr) {
+		if err := m.setFinalizer(ctx, raw, cr, true); err != nil {
+			m.Log.Error("add finalizer failed", "namespace", cr.Namespace, "name", cr.Name, "error", err)
+			return shortBackoff(DefaultRefreshInterval)
+		}
+	}
+
 	result := m.Reconciler.Reconcile(ctx, cr)
 
 	m.Log.Info("reconciled",
@@ -309,6 +328,47 @@ func (m *Manager) watched() dynamic.ResourceInterface {
 // watch scope. An empty Namespace watches every namespace.
 func (m *Manager) accepts(namespace string) bool {
 	return m.Namespace == "" || m.Namespace == namespace
+}
+
+func hasFinalizer(cr *KrypticSecret) bool {
+	for _, name := range cr.Finalizers {
+		if name == LeaseFinalizer {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) setFinalizer(ctx context.Context, raw *unstructured.Unstructured, cr *KrypticSecret, add bool) error {
+	updated := raw.DeepCopy()
+	finalizers := updated.GetFinalizers()
+	next := make([]string, 0, len(finalizers)+1)
+	for _, name := range finalizers {
+		if name != LeaseFinalizer {
+			next = append(next, name)
+		}
+	}
+	if add {
+		next = append(next, LeaseFinalizer)
+	}
+	if sameStrings(finalizers, next) {
+		return nil
+	}
+	updated.SetFinalizers(next)
+	_, err := m.resource().Namespace(cr.Namespace).Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // fromUnstructured decodes a CR through JSON so the typed struct stays the

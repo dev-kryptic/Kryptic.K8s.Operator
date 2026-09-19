@@ -23,6 +23,9 @@ const (
 	ManagedByLabel = "app.kubernetes.io/managed-by"
 	ManagedByValue = "kryptic-operator"
 
+	LeaseIDsAnnotation = "kryptic.dev/dynamic-lease-ids"
+	LeaseFinalizer     = "kryptic.dev/dynamic-leases"
+
 	DefaultRefreshInterval = 5 * time.Minute
 	MinRefreshInterval     = 30 * time.Second
 )

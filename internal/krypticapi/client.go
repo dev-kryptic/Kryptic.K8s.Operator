@@ -45,6 +45,14 @@ type Fetcher interface {
 	Fetch(ctx context.Context, creds Credentials, projectID, environment string) (Bundle, error)
 }
 
+// DynamicFetcher mints and revokes Enterprise dynamic leases on this
+// operator. Optional: stubs used in tests can omit it.
+type DynamicFetcher interface {
+	Fetcher
+	SyncDynamic(ctx context.Context, creds Credentials, projectID, environment string, existing map[string]string) (Bundle, map[string]string, error)
+	RevokeLeases(ctx context.Context, creds Credentials, leaseIDs []string) error
+}
+
 // Client implements Fetcher against the real API, caching tokens and derived
 // unwrap keys per client id (Argon2id costs 64 MiB per derivation - once per
 // credential is enough).
@@ -92,12 +100,20 @@ type bundleEntry struct {
 	EnvironmentId string `json:"environmentId"`
 }
 
+type dynamicHint struct {
+	Key           string `json:"key"`
+	DefinitionId  string `json:"definitionId"`
+	EnvironmentId string `json:"environmentId"`
+	Provider      int    `json:"provider"`
+}
+
 // cipherBundle is the end-to-end encrypted response from GET /api/secrets/bundle:
 // envelopes plus the org key sealed to this machine's public key.
 type cipherBundle struct {
-	OrgKeyId      string        `json:"orgKeyId"`
-	WrappedOrgKey string        `json:"wrappedOrgKey"`
-	Secrets       []bundleEntry `json:"secrets"`
+	OrgKeyId        string         `json:"orgKeyId"`
+	WrappedOrgKey   string         `json:"wrappedOrgKey"`
+	Secrets         []bundleEntry  `json:"secrets"`
+	DynamicSecrets  []dynamicHint  `json:"dynamicSecrets"`
 }
 
 // APIError carries the status code so the reconciler can distinguish
@@ -146,27 +162,9 @@ func (c *Client) Fetch(ctx context.Context, creds Credentials, projectID, enviro
 // decrypt runs the full local chain: clientSecret -Argon2id-> machine private
 // key -sealed box-> org key -AES-GCM-> plaintext values.
 func (c *Client) decrypt(creds Credentials, keys machineKeys, bundle cipherBundle) (Bundle, error) {
-	unwrapKey, err := c.deriveUnwrapKey(creds, keys)
+	orgKey, err := c.openOrgKey(creds, keys, bundle.WrappedOrgKey)
 	if err != nil {
 		return nil, err
-	}
-
-	privateKey, err := envelope.Open(unwrapKey, keys.WrappedPrivateKey, nil)
-	if err != nil {
-		return nil, fmt.Errorf("could not unwrap the machine private key - wrong client secret?")
-	}
-	publicKey, err := base64.RawURLEncoding.DecodeString(keys.PublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("invalid machine public key encoding: %w", err)
-	}
-
-	box, err := sealedbox.Parse(bundle.WrappedOrgKey)
-	if err != nil {
-		return nil, fmt.Errorf("invalid wrapped org key: %w", err)
-	}
-	orgKey, err := sealedbox.Open(sealedbox.KeyPair{Public: publicKey, Private: privateKey}, box)
-	if err != nil {
-		return nil, fmt.Errorf("could not unwrap the org key - the machine grant may be stale, rotate the identity")
 	}
 
 	pairs := make(Bundle, len(bundle.Secrets))
@@ -179,6 +177,30 @@ func (c *Client) decrypt(creds Credentials, keys machineKeys, bundle cipherBundl
 		pairs[entry.Key] = string(plaintext)
 	}
 	return pairs, nil
+}
+
+func (c *Client) openOrgKey(creds Credentials, keys machineKeys, wrapped string) ([]byte, error) {
+	unwrapKey, err := c.deriveUnwrapKey(creds, keys)
+	if err != nil {
+		return nil, err
+	}
+	privateKey, err := envelope.Open(unwrapKey, keys.WrappedPrivateKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not unwrap the machine private key - wrong client secret?")
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(keys.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid machine public key encoding: %w", err)
+	}
+	box, err := sealedbox.Parse(wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("invalid wrapped org key: %w", err)
+	}
+	orgKey, err := sealedbox.Open(sealedbox.KeyPair{Public: publicKey, Private: privateKey}, box)
+	if err != nil {
+		return nil, fmt.Errorf("could not unwrap the org key - the machine grant may be stale, rotate the identity")
+	}
+	return orgKey, nil
 }
 
 // deriveUnwrapKey computes (or returns the cached) Argon2id key for this

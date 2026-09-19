@@ -4,7 +4,8 @@ Keeps native Kubernetes `Secret`s in sync with Kryptic projects. Declare a
 `KrypticSecret`, and the operator authenticates as a machine identity, pulls the
 environment's ciphertext bundle, decrypts it inside the cluster, and writes the
 values into a Secret your workloads consume with `envFrom` - no init containers,
-no sidecars, no secrets in your manifests.
+no sidecars, no secrets in your manifests. Enterprise dynamic keys are minted
+in the operator and revoked when the CR is deleted.
 
 Kryptic secrets are end-to-end encrypted: the platform stores and serves only
 ciphertext. The machine's client secret unwraps its private key (Argon2id), the

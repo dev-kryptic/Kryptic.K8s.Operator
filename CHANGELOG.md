@@ -5,6 +5,15 @@ the GitHub Release (with the container image URL prepended).
 
 ## Unreleased
 
+## 1.2.0 - 2026-09-19
+
+### Added
+
+- Enterprise dynamic secrets are minted on reconcile into the target Secret
+  (`KEY_USERNAME` / `KEY_PASSWORD`) and revoked when the `KrypticSecret` is
+  deleted. Lease ids stay on `kryptic.dev/dynamic-lease-ids`. The operator
+  does not wait for a desktop connector.
+
 ## 1.1.0 - 2026-09-10
 
 ### Fixed
