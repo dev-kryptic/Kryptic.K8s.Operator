@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strings"
 
-	dyn "github.com/dev-kryptic/daemon/dynsecret"
 	"github.com/dev-kryptic/Kryptic.Encryption.Go/envelope"
+	dyn "github.com/dev-kryptic/k8s-operator/internal/dynsecret"
 )
 
 type workBatch struct {

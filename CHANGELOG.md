@@ -5,6 +5,11 @@ the GitHub Release (with the container image URL prepended).
 
 ## Unreleased
 
+### Fixed
+
+- The operator builds in CI and in the image without a sibling
+  `Kryptic.Daemon` checkout. Mint and revoke providers live in this repo.
+
 ## 1.2.0 - 2026-09-19
 
 ### Added
