@@ -43,6 +43,9 @@ func (c *Client) SyncDynamic(ctx context.Context, creds Credentials, projectID, 
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(bundle.DynamicSecrets) == 0 && len(existing) == 0 {
+		return Bundle{}, map[string]string{}, nil
+	}
 	orgKey, err := c.orgKey(creds, keys, bundle.WrappedOrgKey)
 	if err != nil {
 		return nil, nil, err
@@ -128,6 +131,10 @@ func (c *Client) ensureLease(ctx context.Context, creds Credentials, token strin
 func (c *Client) applyOwnWork(ctx context.Context, creds Credentials, token string, orgKey []byte) error {
 	var batch workBatch
 	if err := c.do(ctx, creds, token, http.MethodGet, "/api/dynamic-secrets/work", nil, &batch); err != nil {
+		var apiError *APIError
+		if asAPIError(err, &apiError) && apiError.Status == http.StatusNotFound {
+			return nil
+		}
 		return err
 	}
 	for _, item := range batch.Items {

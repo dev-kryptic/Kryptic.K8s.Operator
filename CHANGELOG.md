@@ -9,6 +9,9 @@ the GitHub Release (with the container image URL prepended).
 
 - The operator builds in CI and in the image without a sibling
   `Kryptic.Daemon` checkout. Mint and revoke providers live in this repo.
+- Reconcile no longer fails a static secret sync when
+  `GET /api/dynamic-secrets/work` is missing. Leftover lease work runs only
+  when the bundle has dynamic secrets or this CR already holds lease ids.
 
 ## 1.2.0 - 2026-09-19
 

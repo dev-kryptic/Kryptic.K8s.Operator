@@ -140,6 +140,16 @@ func (p *fakePlatform) serve(writer http.ResponseWriter, request *http.Request) 
 			return
 		}
 		p.serveBundle(writer)
+	case request.Method == http.MethodGet && request.URL.Path == "/api/dynamic-secrets/work":
+		if !p.authorized(request) {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"orgKeyId":      platformOrgKeyID,
+			"wrappedOrgKey": p.wrappedOrgKey,
+			"items":         []any{},
+		})
 	default:
 		http.NotFound(writer, request)
 	}
@@ -206,8 +216,9 @@ func (p *fakePlatform) serveBundle(writer http.ResponseWriter) {
 		})
 	}
 	_ = json.NewEncoder(writer).Encode(map[string]any{
-		"orgKeyId":      platformOrgKeyID,
-		"wrappedOrgKey": p.wrappedOrgKey,
-		"secrets":       secrets,
+		"orgKeyId":       platformOrgKeyID,
+		"wrappedOrgKey":  p.wrappedOrgKey,
+		"secrets":        secrets,
+		"dynamicSecrets": []any{},
 	})
 }
