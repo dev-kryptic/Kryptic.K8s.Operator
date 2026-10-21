@@ -137,7 +137,7 @@ func (m *Manager) reconcileOne(ctx context.Context, item queueItem) time.Duratio
 
 	if cr.DeletionTimestamp != nil && !cr.DeletionTimestamp.IsZero() {
 		if err := m.Reconciler.RevokeCRLeases(ctx, cr); err != nil {
-			m.Log.Error("revoke on delete failed", "namespace", cr.Namespace, "name", cr.Name, "error", err)
+			m.Log.Error("revoke on delete failed", "namespace", cr.Namespace, "name", cr.Name, "error", "redacted")
 			return shortBackoff(DefaultRefreshInterval)
 		}
 		if err := m.setFinalizer(ctx, raw, cr, false); err != nil {
